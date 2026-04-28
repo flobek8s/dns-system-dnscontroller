@@ -1,0 +1,21 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.rbac.clusterrolebinding.name }}
+roleRef:
+  apiGroup: {{ .Values.rbac.clusterrolebinding.roleRef.apiGroup }}
+  kind: {{ .Values.rbac.clusterrolebinding.roleRef.kind }}
+  name: {{ .Values.rbac.clusterrolebinding.roleRef.name }}
+subjects:
+{{- $subjects := .Values.rbac.clusterrolebinding.subjects }}
+{{- if kindIs "slice" $subjects }}
+{{- range $subject := $subjects }}
+- kind: {{ $subject.kind }}
+  name: {{ default $.Values.rbac.serviceAccountName $subject.name }}
+  namespace: {{ default $.Values.namespace $subject.namespace }}
+{{- end }}
+{{- else }}
+- kind: {{ $subjects.kind }}
+  name: {{ default .Values.rbac.serviceAccountName $subjects.name }}
+  namespace: {{ default .Values.namespace $subjects.namespace }}
+{{- end }}
