@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: harbor.phink8s.com/library/dns-controller
+  pullPolicy: Always
+  # Tag is set from Chart.yaml appVersion
+
+namespace: dns-system
+
+secretsName: dnscontroller-secrets
+
+rbac:
+  serviceAccountName: dns-controller
+  clusterrole:
+    name: dns-controller-role
+  clusterrolebinding:
+    name: dns-controller-binding
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: dns-controller-role
+    subjects:
+      - kind: ServiceAccount

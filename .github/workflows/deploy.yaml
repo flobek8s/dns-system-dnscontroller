@@ -1,0 +1,43 @@
+name: DNS-Controller-Build-and-Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+      - 'values.yaml'
+      - 'Chart.yaml'
+      - '.github/workflows/deploy.yaml'
+
+jobs:
+  build:
+    runs-on: [flobek8s-runners]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Get version from Chart.yaml
+        id: version
+        run: |
+          VERSION=$(grep 'appVersion:' Chart.yaml | awk '{print $2}' | tr -d '"')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Get App Name from Chart.yaml
+        id: app_name
+        run: |
+          APP_NAME=$(grep 'name:' Chart.yaml | awk '{print $2}' | tr -d '"')
+          echo "APP_NAME=$APP_NAME" >> $GITHUB_OUTPUT
+
+      - name: Build New Image
+        run: |
+          docker build -t harbor.phink8s.com/library/${{ steps.app_name.outputs.APP_NAME }}:${{ steps.version.outputs.VERSION }} .
+
+      - name: Login to Harbor
+        run: |
+          echo "${{ secrets.HARBOR_PASSWORD }}" | docker login harbor.phink8s.com \
+            -u ${{ secrets.HARBOR_USERNAME }} \
+            --password-stdin
+
+      - name: Push New Image
+        run: |
+          docker push harbor.phink8s.com/library/${{ steps.app_name.outputs.APP_NAME }}:${{ steps.version.outputs.VERSION }}
