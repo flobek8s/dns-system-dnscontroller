@@ -8,7 +8,10 @@ define('DB_USER', $_ENV['mysql_user']);
 define('DB_PASS', $_ENV['mysql_pass']);
 define('DB_NAME', $_ENV['mysql_db']);
 
-$interval = 60;
+// Poll Once an hour
+$interval = 3600;
+// Every 60 Seconds
+// $interval - 60;
 
 // Kubernetes in-cluster auth
 $tokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token";
