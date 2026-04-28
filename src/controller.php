@@ -59,8 +59,6 @@ while (true) {
             throw new Exception(curl_error($ch));
         }
 
-        curl_close($ch);
-
         $data = json_decode($response, true);
 
         if (!isset($data['items'])) {
@@ -70,14 +68,19 @@ while (true) {
         // -----------------------------
         // EXTRACT HOSTS
         // -----------------------------
-        $stmt = $pdo->prepare("
-            INSERT INTO k8s_ingress_dns (namespace, ingress_name, domain, last_seen)
-            VALUES (:namespace, :ingress, :domain, NOW())
-            ON DUPLICATE KEY UPDATE
-                last_seen = NOW(),
-                namespace = VALUES(namespace),
-                ingress_name = VALUES(ingress_name)
+        $findExisting = $pdo->prepare("SELECT id FROM k8s_ingress_dns WHERE domain = :domain LIMIT 1");
+        $insertEntry = $pdo->prepare("
+            INSERT INTO k8s_ingress_dns (id, namespace, ingress_name, domain, last_seen)
+            VALUES (:id, :namespace, :ingress, :domain, NOW())
         ");
+        $updateEntry = $pdo->prepare("
+            UPDATE k8s_ingress_dns
+            SET namespace = :namespace,
+                ingress_name = :ingress,
+                last_seen = NOW()
+            WHERE id = :id
+        ");
+        $nextEntryId = (int)$pdo->query("SELECT COALESCE(MAX(id), 0) + 1 FROM k8s_ingress_dns")->fetchColumn();
 
         $count = 0;
 
@@ -98,11 +101,25 @@ while (true) {
 
                 $domain = $rule['host'];
 
-                $stmt->execute([
-                    ':namespace' => $namespace,
-                    ':ingress' => $name,
+                $findExisting->execute([
                     ':domain' => $domain
                 ]);
+                $existingId = $findExisting->fetchColumn();
+
+                if ($existingId !== false) {
+                    $updateEntry->execute([
+                        ':id' => $existingId,
+                        ':namespace' => $namespace,
+                        ':ingress' => $name
+                    ]);
+                } else {
+                    $insertEntry->execute([
+                        ':id' => $nextEntryId++,
+                        ':namespace' => $namespace,
+                        ':ingress' => $name,
+                        ':domain' => $domain
+                    ]);
+                }
 
                 $count++;
             }
