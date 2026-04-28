@@ -231,6 +231,7 @@ while (true) {
                     'domain' => $domain,
                     'service' => implode(', ', $serviceNames),
                     'ip' => implode(', ', $ips),
+                    'type' => 'ingress',
                 ];
             }
         }
@@ -260,6 +261,7 @@ while (true) {
                         'domain' => $domain,
                         'service' => implode(', ', $serviceNames),
                         'ip' => implode(', ', $ips),
+                        'type' => 'ingressroute',
                     ];
                 }
             }
@@ -290,6 +292,7 @@ while (true) {
                         'domain' => $domain,
                         'service' => implode(', ', $serviceNames),
                         'ip' => implode(', ', $ips),
+                        'type' => 'ingressroutetcp',
                     ];
                 }
             }
@@ -300,8 +303,8 @@ while (true) {
         // -----------------------------
         $findExisting = $pdo->prepare("SELECT id FROM k8s_ingress_dns WHERE domain = :domain LIMIT 1");
         $insertEntry = $pdo->prepare("
-            INSERT INTO k8s_ingress_dns (id, namespace, ingress_name, domain, service, ip, last_seen)
-            VALUES (:id, :namespace, :ingress, :domain, :service, :ip, NOW())
+            INSERT INTO k8s_ingress_dns (id, namespace, ingress_name, domain, service, ip, type, last_seen)
+            VALUES (:id, :namespace, :ingress, :domain, :service, :ip, :type, NOW())
         ");
         $updateEntry = $pdo->prepare("
             UPDATE k8s_ingress_dns
@@ -309,6 +312,7 @@ while (true) {
                 ingress_name = :ingress,
                 service = :service,
                 ip = :ip,
+                type = :type,
                 last_seen = NOW()
             WHERE id = :id
         ");
@@ -328,7 +332,8 @@ while (true) {
                     ':namespace' => $record['namespace'],
                     ':ingress' => $record['ingress_name'],
                     ':service' => $record['service'],
-                    ':ip' => $record['ip']
+                    ':ip' => $record['ip'],
+                    ':type' => $record['type']
                 ]);
             } else {
                 $insertEntry->execute([
@@ -337,7 +342,8 @@ while (true) {
                     ':ingress' => $record['ingress_name'],
                     ':domain' => $record['domain'],
                     ':service' => $record['service'],
-                    ':ip' => $record['ip']
+                    ':ip' => $record['ip'],
+                    ':type' => $record['type']
                 ]);
             }
 
