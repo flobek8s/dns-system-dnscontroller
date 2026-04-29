@@ -1,32 +1,5 @@
 <?php
 
-function createPiholeSession(array $config)
-{
-    if ($config['pihole_url'] === '' || $config['pihole_pass'] === '') {
-        return null;
-    }
-
-    $baseUrl = rtrim($config['pihole_url'], '/');
-    $authData = piholeApiRequest(
-        $baseUrl . '/api/auth',
-        'POST',
-        ['Content-Type: application/json'],
-        json_encode(['password' => $config['pihole_pass']]),
-        $config['pihole_verify_ssl']
-    );
-
-    $sid = $authData['session']['sid'] ?? null;
-    if ($sid === null || $sid === '') {
-        throw new Exception('Pi-hole authentication failed: SID missing');
-    }
-
-    return [
-        'base_url' => $baseUrl,
-        'sid' => $sid,
-        'verify_ssl' => $config['pihole_verify_ssl'],
-    ];
-}
-
 function piholeConfigValueRequest(array $session, $method, $element, $value)
 {
     $encodedValue = urlencode($value);
@@ -67,25 +40,26 @@ function reconcileManagedDomainsInPihole(PDO $pdo, array $config)
         ];
     }
 
-    $currentEntries = fetchPiholeHostEntries($config);
-    if ($currentEntries === null) {
-        return [
-            'skipped' => true,
-            'inserted' => 0,
-            'updated' => 0,
-            'removed' => 0,
-            'events' => [],
-        ];
-    }
+    try {
+        $currentEntries = fetchPiholeHostEntries($config, $session);
+        if ($currentEntries === null) {
+            return [
+                'skipped' => true,
+                'inserted' => 0,
+                'updated' => 0,
+                'removed' => 0,
+                'events' => [],
+            ];
+        }
 
-    [$activeDomains, $inactiveDomains] = getManagedDomainsForReconciliation($pdo);
+        [$activeDomains, $inactiveDomains] = getManagedDomainsForReconciliation($pdo);
 
-    $inserted = 0;
-    $updated = 0;
-    $removed = 0;
-    $events = [];
+        $inserted = 0;
+        $updated = 0;
+        $removed = 0;
+        $events = [];
 
-    foreach ($activeDomains as $managedDomain) {
+        foreach ($activeDomains as $managedDomain) {
         $domain = $managedDomain['domain'];
         $targetIp = trim((string)($managedDomain['target_ip'] ?? ''));
 
@@ -129,9 +103,9 @@ function reconcileManagedDomainsInPihole(PDO $pdo, array $config)
                 ],
             ];
         }
-    }
+        }
 
-    foreach ($inactiveDomains as $managedDomain) {
+        foreach ($inactiveDomains as $managedDomain) {
         $domain = $managedDomain['domain'];
 
         if (!shouldManageDomain($domain)) {
@@ -157,13 +131,20 @@ function reconcileManagedDomainsInPihole(PDO $pdo, array $config)
             ],
             'new' => null,
         ];
-    }
+        }
 
-    return [
-        'skipped' => false,
-        'inserted' => $inserted,
-        'updated' => $updated,
-        'removed' => $removed,
-        'events' => $events,
-    ];
+        return [
+            'skipped' => false,
+            'inserted' => $inserted,
+            'updated' => $updated,
+            'removed' => $removed,
+            'events' => $events,
+        ];
+    } finally {
+        try {
+            closePiholeSession($session);
+        } catch (Exception $ignored) {
+            // Best effort close to avoid leaking API sessions.
+        }
+    }
 }

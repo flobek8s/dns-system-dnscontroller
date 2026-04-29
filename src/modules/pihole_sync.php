@@ -30,14 +30,18 @@ function piholeApiRequest($url, $method, array $headers, $body, $verifySsl)
         throw new Exception('Pi-hole API request failed: HTTP ' . $statusCode . ' - ' . $response);
     }
 
+    if ($response === '' || $response === null) {
+        return [];
+    }
+
     if (!is_array($data)) {
-        throw new Exception('Unexpected Pi-hole response: ' . $response);
+        return ['raw' => $response];
     }
 
     return $data;
 }
 
-function fetchPiholeHostEntries(array $config)
+function createPiholeSession(array $config)
 {
     if ($config['pihole_url'] === '' || $config['pihole_pass'] === '') {
         return null;
@@ -58,15 +62,45 @@ function fetchPiholeHostEntries(array $config)
         throw new Exception('Pi-hole authentication failed: SID missing');
     }
 
+    return [
+        'base_url' => $baseUrl,
+        'sid' => $sid,
+        'verify_ssl' => $config['pihole_verify_ssl'],
+    ];
+}
+
+function closePiholeSession(array $session)
+{
+    piholeApiRequest(
+        $session['base_url'] . '/api/auth',
+        'DELETE',
+        [
+            'accept: application/json',
+            'sid: ' . $session['sid']
+        ],
+        null,
+        $session['verify_ssl']
+    );
+}
+
+function fetchPiholeHostEntries(array $config, $session = null)
+{
+    if ($session === null) {
+        $session = createPiholeSession($config);
+        if ($session === null) {
+            return null;
+        }
+    }
+
     $hostsData = piholeApiRequest(
-        $baseUrl . '/api/config/dns/hosts',
+        $session['base_url'] . '/api/config/dns/hosts',
         'GET',
         [
             'accept: application/json',
-            'sid: ' . $sid
+            'sid: ' . $session['sid']
         ],
         null,
-        $config['pihole_verify_ssl']
+        $session['verify_ssl']
     );
 
     if (!isset($hostsData['config']['dns']['hosts']) || !is_array($hostsData['config']['dns']['hosts'])) {
@@ -89,8 +123,8 @@ function fetchPiholeHostEntries(array $config)
 
 function syncPiholeDnsEntries(PDO $pdo, array $config)
 {
-    $currentEntries = fetchPiholeHostEntries($config);
-    if ($currentEntries === null) {
+    $session = createPiholeSession($config);
+    if ($session === null) {
         return [
             'skipped' => true,
             'active' => 0,
@@ -101,9 +135,21 @@ function syncPiholeDnsEntries(PDO $pdo, array $config)
         ];
     }
 
-    $pdo->beginTransaction();
-
     try {
+        $currentEntries = fetchPiholeHostEntries($config, $session);
+        if ($currentEntries === null) {
+            return [
+                'skipped' => true,
+                'active' => 0,
+                'removed' => 0,
+                'inserted' => 0,
+                'updated' => 0,
+                'events' => [],
+            ];
+        }
+
+        $pdo->beginTransaction();
+
         $stmt = $pdo->query('SELECT id, domain, ip, datecreated, dateupdated FROM pihole_dns_entries');
         $dbEntries = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -211,7 +257,15 @@ function syncPiholeDnsEntries(PDO $pdo, array $config)
             'events' => $events,
         ];
     } catch (Exception $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         throw $e;
+    } finally {
+        try {
+            closePiholeSession($session);
+        } catch (Exception $ignored) {
+            // Best effort close to avoid leaking API sessions.
+        }
     }
 }
