@@ -122,8 +122,10 @@ function logSyncEvents(PDO $pdo, $runId, $processName, array $events)
     }
 }
 
-function syncManagedDomainsFromIngress(PDO $pdo, array $records)
+function syncManagedDomainsFromIngress(PDO $pdo, array $records, $staleAfterSeconds = 0)
 {
+    $staleAfterSeconds = max(0, (int)$staleAfterSeconds);
+
     $upsert = $pdo->prepare('INSERT INTO dns_controller_managed_domains
         (domain, ingress_type, target_ip, service, last_seen, active)
         VALUES (:domain, :ingress_type, :target_ip, :service, NOW(), 1)
@@ -146,13 +148,26 @@ function syncManagedDomainsFromIngress(PDO $pdo, array $records)
     }
 
     if (empty($domains)) {
-        $pdo->exec('UPDATE dns_controller_managed_domains SET active = 0 WHERE active = 1');
+        if ($staleAfterSeconds <= 0) {
+            $pdo->exec('UPDATE dns_controller_managed_domains SET active = 0 WHERE active = 1');
+            return;
+        }
+
+        $pdo->exec('UPDATE dns_controller_managed_domains
+            SET active = 0
+            WHERE active = 1 AND last_seen < DATE_SUB(NOW(), INTERVAL ' . $staleAfterSeconds . ' SECOND)');
         return;
     }
 
     $placeholders = implode(',', array_fill(0, count($domains), '?'));
-    $stmt = $pdo->prepare('UPDATE dns_controller_managed_domains
+    $sql = 'UPDATE dns_controller_managed_domains
         SET active = 0
-        WHERE active = 1 AND domain NOT IN (' . $placeholders . ')');
+        WHERE active = 1 AND domain NOT IN (' . $placeholders . ')';
+
+    if ($staleAfterSeconds > 0) {
+        $sql .= ' AND last_seen < DATE_SUB(NOW(), INTERVAL ' . $staleAfterSeconds . ' SECOND)';
+    }
+
+    $stmt = $pdo->prepare($sql);
     $stmt->execute($domains);
 }

@@ -23,13 +23,28 @@ function parseMatchHosts($match)
 
     $hosts = [];
 
-    if (preg_match_all('/Host(?:SNI)?\(([^)]*)\)/', $match, $functionMatches)) {
+    if (preg_match_all('/Host(?:SNI)?\(([^)]*)\)/i', $match, $functionMatches)) {
         foreach ($functionMatches[1] as $argumentList) {
-            if (preg_match_all('/`([^`]+)`/', $argumentList, $hostMatches)) {
+            $matchedQuotedHost = false;
+
+            if (preg_match_all('/[`\'"]([^`\'"]+)[`\'"]/', $argumentList, $hostMatches)) {
+                $matchedQuotedHost = true;
+
                 foreach ($hostMatches[1] as $host) {
                     if (shouldManageDomain($host)) {
                         $hosts[] = $host;
                     }
+                }
+            }
+
+            if ($matchedQuotedHost) {
+                continue;
+            }
+
+            foreach (explode(',', $argumentList) as $candidate) {
+                $host = trim((string)$candidate, " \t\n\r\0\x0B`'\"");
+                if (shouldManageDomain($host)) {
+                    $hosts[] = $host;
                 }
             }
         }

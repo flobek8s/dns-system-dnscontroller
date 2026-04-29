@@ -20,9 +20,10 @@ while (true) {
         $runId = startSyncRun($pdo);
         echo "[" . date('Y-m-d H:i:s') . "] Sync starting...\n";
 
+        $staleAfterSeconds = max($config['interval_seconds'] * 3, 120);
         $records = collectIngressRecords($config['kube_api'], $token, $config['ca_file']);
-        $ingressResult = upsertIngressDnsRecords($pdo, $records);
-        syncManagedDomainsFromIngress($pdo, $records);
+        $ingressResult = upsertIngressDnsRecords($pdo, $records, $staleAfterSeconds);
+        syncManagedDomainsFromIngress($pdo, $records, $staleAfterSeconds);
         logSyncEvents($pdo, $runId, 'ingress', $ingressResult['events']);
 
         $piholeResult = syncPiholeDnsEntries($pdo, $config);
@@ -31,6 +32,9 @@ while (true) {
         logSyncEvents($pdo, $runId, 'pihole_reconcile', $reconcileResult['events']);
 
         echo "[" . date('Y-m-d H:i:s') . "] Ingress processed=" . $ingressResult['processed'] . ", inserted=" . $ingressResult['inserted'] . ", updated=" . $ingressResult['updated'] . ", unchanged=" . $ingressResult['unchanged'] . ", removed=" . $ingressResult['removed'] . "\n";
+        if (!empty($ingressResult['stale_candidates'])) {
+            echo "[" . date('Y-m-d H:i:s') . "] Ingress stale candidates preserved by grace window: " . implode(', ', $ingressResult['stale_candidates']) . "\n";
+        }
         if ($piholeResult['skipped']) {
             echo "[" . date('Y-m-d H:i:s') . "] Pi-hole sync skipped (missing pihole_url or pihole_pass)\n";
         } else {

@@ -1,8 +1,8 @@
 <?php
 
-function upsertIngressDnsRecords(PDO $pdo, array $records)
+function upsertIngressDnsRecords(PDO $pdo, array $records, $staleAfterSeconds = 0)
 {
-    $existingStmt = $pdo->query('SELECT id, namespace, ingress_name, domain, service, ip, type FROM k8s_ingress_dns');
+    $existingStmt = $pdo->query('SELECT id, namespace, ingress_name, domain, service, ip, type, last_seen FROM k8s_ingress_dns');
     $existingRows = $existingStmt->fetchAll(PDO::FETCH_ASSOC);
     $existingByDomain = [];
     foreach ($existingRows as $row) {
@@ -32,8 +32,11 @@ function upsertIngressDnsRecords(PDO $pdo, array $records)
     $updated = 0;
     $unchanged = 0;
     $removed = 0;
+    $staleCandidates = [];
     $events = [];
     $seenDomains = [];
+    $staleAfterSeconds = max(0, (int)$staleAfterSeconds);
+    $staleCutoff = $staleAfterSeconds > 0 ? (time() - $staleAfterSeconds) : time();
 
     foreach ($records as $record) {
         $seenDomains[$record['domain']] = true;
@@ -109,6 +112,12 @@ function upsertIngressDnsRecords(PDO $pdo, array $records)
             continue;
         }
 
+        $lastSeen = isset($existing['last_seen']) ? strtotime((string)$existing['last_seen']) : false;
+        if ($lastSeen !== false && $lastSeen > $staleCutoff) {
+            $staleCandidates[] = $domain;
+            continue;
+        }
+
         $deleteEntry->execute([
             ':id' => $existing['id']
         ]);
@@ -135,6 +144,7 @@ function upsertIngressDnsRecords(PDO $pdo, array $records)
         'updated' => $updated,
         'unchanged' => $unchanged,
         'removed' => $removed,
+        'stale_candidates' => $staleCandidates,
         'events' => $events,
     ];
 }
