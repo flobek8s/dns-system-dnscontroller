@@ -5,6 +5,7 @@ require_once __DIR__ . '/modules/kubernetes.php';
 require_once __DIR__ . '/modules/record_collector.php';
 require_once __DIR__ . '/modules/db_sync.php';
 require_once __DIR__ . '/modules/pihole_sync.php';
+require_once __DIR__ . '/modules/pihole_reconciler.php';
 require_once __DIR__ . '/modules/sync_audit.php';
 
 $config = loadConfig();
@@ -25,13 +26,20 @@ while (true) {
         logSyncEvents($pdo, $runId, 'ingress', $ingressResult['events']);
 
         $piholeResult = syncPiholeDnsEntries($pdo, $config);
-        logSyncEvents($pdo, $runId, 'pihole', $piholeResult['events']);
+        logSyncEvents($pdo, $runId, 'pihole_inventory', $piholeResult['events']);
+        $reconcileResult = reconcileManagedDomainsInPihole($pdo, $config);
+        logSyncEvents($pdo, $runId, 'pihole_reconcile', $reconcileResult['events']);
 
         echo "[" . date('Y-m-d H:i:s') . "] Synced " . $ingressResult['processed'] . " domains\n";
         if ($piholeResult['skipped']) {
             echo "[" . date('Y-m-d H:i:s') . "] Pi-hole sync skipped (missing pihole_url or pihole_pass)\n";
         } else {
             echo "[" . date('Y-m-d H:i:s') . "] Pi-hole entries active=" . $piholeResult['active'] . ", removed=" . $piholeResult['removed'] . "\n";
+        }
+        if ($reconcileResult['skipped']) {
+            echo "[" . date('Y-m-d H:i:s') . "] Pi-hole reconcile skipped (missing pihole_url or pihole_pass)\n";
+        } else {
+            echo "[" . date('Y-m-d H:i:s') . "] Pi-hole reconcile inserted=" . $reconcileResult['inserted'] . ", updated=" . $reconcileResult['updated'] . ", removed=" . $reconcileResult['removed'] . "\n";
         }
 
         finishSyncRun($pdo, $runId, 'success', [
@@ -40,10 +48,10 @@ while (true) {
             'ingress_updated' => $ingressResult['updated'],
             'ingress_unchanged' => $ingressResult['unchanged'],
             'pihole_active' => $piholeResult['active'],
-            'pihole_inserted' => $piholeResult['inserted'],
-            'pihole_updated' => $piholeResult['updated'],
-            'pihole_removed' => $piholeResult['removed'],
-            'pihole_skipped' => $piholeResult['skipped'],
+            'pihole_inserted' => $reconcileResult['inserted'],
+            'pihole_updated' => $reconcileResult['updated'],
+            'pihole_removed' => $reconcileResult['removed'],
+            'pihole_skipped' => $piholeResult['skipped'] || $reconcileResult['skipped'],
         ], null);
     } catch (Exception $e) {
         echo "[" . date('Y-m-d H:i:s') . "] ERROR: " . $e->getMessage() . "\n";

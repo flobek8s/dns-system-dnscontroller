@@ -27,13 +27,30 @@ function parseMatchHosts($match)
         foreach ($functionMatches[1] as $argumentList) {
             if (preg_match_all('/`([^`]+)`/', $argumentList, $hostMatches)) {
                 foreach ($hostMatches[1] as $host) {
-                    $hosts[] = $host;
+                    if (shouldManageDomain($host)) {
+                        $hosts[] = $host;
+                    }
                 }
             }
         }
     }
 
     return array_values(array_unique($hosts));
+}
+
+function shouldManageDomain($domain)
+{
+    if (!is_string($domain)) {
+        return false;
+    }
+
+    $domain = trim($domain);
+
+    if ($domain === '' || $domain === '*' || strpos($domain, '*') !== false) {
+        return false;
+    }
+
+    return (bool)preg_match('/^(?=.{1,253}$)(?!-)(?:[a-zA-Z0-9-]{1,63}\.)+[a-zA-Z]{2,63}$/', $domain);
 }
 
 function buildServiceIndex(array $serviceItems)
@@ -102,6 +119,18 @@ function resolveRecordIps(array $resource, array $routeServices, $namespace, arr
     return $defaultIngressIps;
 }
 
+function selectPrimaryIp(array $ips)
+{
+    foreach ($ips as $ip) {
+        $ip = trim((string)$ip);
+        if ($ip !== '') {
+            return $ip;
+        }
+    }
+
+    return '';
+}
+
 function collectIngressRecords($kubeApi, $token, $caFile)
 {
     $ingressData = kubernetesGetJson($kubeApi, $token, $caFile, '/apis/networking.k8s.io/v1/ingresses');
@@ -124,7 +153,7 @@ function collectIngressRecords($kubeApi, $token, $caFile)
         foreach (($ingress['spec']['rules'] ?? []) as $rule) {
             $domain = $rule['host'] ?? null;
 
-            if ($domain === null || $domain === '') {
+            if (!shouldManageDomain($domain)) {
                 continue;
             }
 
@@ -144,7 +173,7 @@ function collectIngressRecords($kubeApi, $token, $caFile)
                 'ingress_name' => $name,
                 'domain' => $domain,
                 'service' => implode(', ', $serviceNames),
-                'ip' => implode(', ', $ips),
+                'ip' => selectPrimaryIp($ips),
                 'type' => 'ingress',
             ];
         }
@@ -174,7 +203,7 @@ function collectIngressRecords($kubeApi, $token, $caFile)
                     'ingress_name' => $name,
                     'domain' => $domain,
                     'service' => implode(', ', $serviceNames),
-                    'ip' => implode(', ', $ips),
+                    'ip' => selectPrimaryIp($ips),
                     'type' => 'ingressroute',
                 ];
             }
@@ -205,7 +234,7 @@ function collectIngressRecords($kubeApi, $token, $caFile)
                     'ingress_name' => $name,
                     'domain' => $domain,
                     'service' => implode(', ', $serviceNames),
-                    'ip' => implode(', ', $ips),
+                    'ip' => selectPrimaryIp($ips),
                     'type' => 'ingressroutetcp',
                 ];
             }
