@@ -16,6 +16,7 @@ function ensureSyncAuditTables(PDO $pdo)
         ingress_inserted INT NOT NULL DEFAULT 0,
         ingress_updated INT NOT NULL DEFAULT 0,
         ingress_unchanged INT NOT NULL DEFAULT 0,
+        ingress_removed INT NOT NULL DEFAULT 0,
         pihole_active INT NOT NULL DEFAULT 0,
         pihole_inserted INT NOT NULL DEFAULT 0,
         pihole_updated INT NOT NULL DEFAULT 0,
@@ -23,6 +24,11 @@ function ensureSyncAuditTables(PDO $pdo)
         pihole_skipped TINYINT(1) NOT NULL DEFAULT 0,
         message TEXT NULL
     )');
+
+    try {
+        $pdo->exec('ALTER TABLE dns_controller_sync_runs ADD COLUMN ingress_removed INT NOT NULL DEFAULT 0');
+    } catch (Exception $ignored) {
+    }
 
     $pdo->exec('CREATE TABLE IF NOT EXISTS dns_controller_sync_events (
         event_id VARCHAR(40) PRIMARY KEY,
@@ -67,6 +73,7 @@ function finishSyncRun(PDO $pdo, $runId, $status, array $summary, $message)
             ingress_inserted = :ingress_inserted,
             ingress_updated = :ingress_updated,
             ingress_unchanged = :ingress_unchanged,
+            ingress_removed = :ingress_removed,
             pihole_active = :pihole_active,
             pihole_inserted = :pihole_inserted,
             pihole_updated = :pihole_updated,
@@ -81,6 +88,7 @@ function finishSyncRun(PDO $pdo, $runId, $status, array $summary, $message)
         ':ingress_inserted' => (int)($summary['ingress_inserted'] ?? 0),
         ':ingress_updated' => (int)($summary['ingress_updated'] ?? 0),
         ':ingress_unchanged' => (int)($summary['ingress_unchanged'] ?? 0),
+        ':ingress_removed' => (int)($summary['ingress_removed'] ?? 0),
         ':pihole_active' => (int)($summary['pihole_active'] ?? 0),
         ':pihole_inserted' => (int)($summary['pihole_inserted'] ?? 0),
         ':pihole_updated' => (int)($summary['pihole_updated'] ?? 0),

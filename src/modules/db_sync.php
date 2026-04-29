@@ -2,6 +2,13 @@
 
 function upsertIngressDnsRecords(PDO $pdo, array $records)
 {
+    $existingStmt = $pdo->query('SELECT id, namespace, ingress_name, domain, service, ip, type FROM k8s_ingress_dns');
+    $existingRows = $existingStmt->fetchAll(PDO::FETCH_ASSOC);
+    $existingByDomain = [];
+    foreach ($existingRows as $row) {
+        $existingByDomain[$row['domain']] = $row;
+    }
+
     $findExisting = $pdo->prepare('SELECT id, namespace, ingress_name, domain, service, ip, type FROM k8s_ingress_dns WHERE domain = :domain LIMIT 1');
     $insertEntry = $pdo->prepare('
         INSERT INTO k8s_ingress_dns (id, namespace, ingress_name, domain, service, ip, type, last_seen)
@@ -17,15 +24,20 @@ function upsertIngressDnsRecords(PDO $pdo, array $records)
             last_seen = NOW()
         WHERE id = :id
     ');
+    $deleteEntry = $pdo->prepare('DELETE FROM k8s_ingress_dns WHERE id = :id');
     $nextEntryId = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) + 1 FROM k8s_ingress_dns')->fetchColumn();
 
     $processed = 0;
     $inserted = 0;
     $updated = 0;
     $unchanged = 0;
+    $removed = 0;
     $events = [];
+    $seenDomains = [];
 
     foreach ($records as $record) {
+        $seenDomains[$record['domain']] = true;
+
         $findExisting->execute([
             ':domain' => $record['domain']
         ]);
@@ -92,11 +104,37 @@ function upsertIngressDnsRecords(PDO $pdo, array $records)
         $processed++;
     }
 
+    foreach ($existingByDomain as $domain => $existing) {
+        if (isset($seenDomains[$domain])) {
+            continue;
+        }
+
+        $deleteEntry->execute([
+            ':id' => $existing['id']
+        ]);
+
+        $removed++;
+        $events[] = [
+            'action' => 'delete',
+            'domain' => $domain,
+            'old' => [
+                'namespace' => $existing['namespace'],
+                'ingress_name' => $existing['ingress_name'],
+                'domain' => $existing['domain'],
+                'service' => $existing['service'],
+                'ip' => $existing['ip'],
+                'type' => $existing['type'],
+            ],
+            'new' => null,
+        ];
+    }
+
     return [
         'processed' => $processed,
         'inserted' => $inserted,
         'updated' => $updated,
         'unchanged' => $unchanged,
+        'removed' => $removed,
         'events' => $events,
     ];
 }

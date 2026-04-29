@@ -30,7 +30,7 @@ while (true) {
         $reconcileResult = reconcileManagedDomainsInPihole($pdo, $config);
         logSyncEvents($pdo, $runId, 'pihole_reconcile', $reconcileResult['events']);
 
-        echo "[" . date('Y-m-d H:i:s') . "] Synced " . $ingressResult['processed'] . " domains\n";
+        echo "[" . date('Y-m-d H:i:s') . "] Ingress processed=" . $ingressResult['processed'] . ", inserted=" . $ingressResult['inserted'] . ", updated=" . $ingressResult['updated'] . ", unchanged=" . $ingressResult['unchanged'] . ", removed=" . $ingressResult['removed'] . "\n";
         if ($piholeResult['skipped']) {
             echo "[" . date('Y-m-d H:i:s') . "] Pi-hole sync skipped (missing pihole_url or pihole_pass)\n";
         } else {
@@ -47,6 +47,7 @@ while (true) {
             'ingress_inserted' => $ingressResult['inserted'],
             'ingress_updated' => $ingressResult['updated'],
             'ingress_unchanged' => $ingressResult['unchanged'],
+            'ingress_removed' => $ingressResult['removed'],
             'pihole_active' => $piholeResult['active'],
             'pihole_inserted' => $reconcileResult['inserted'],
             'pihole_updated' => $reconcileResult['updated'],
