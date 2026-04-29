@@ -1,7 +1,8 @@
 FROM php:8.5.5-cli
 
-# Install MySQL PDO extension
-RUN docker-php-ext-install pdo pdo_mysql curl
+# Install system dependencies and PHP extensions
+RUN apt-get update && apt-get install -y libcurl4-openssl-dev && rm -rf /var/lib/apt/lists/* \
+    && docker-php-ext-install pdo pdo_mysql curl
 
 WORKDIR /app
 
