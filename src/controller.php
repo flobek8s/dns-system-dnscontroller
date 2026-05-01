@@ -64,6 +64,26 @@ while (true) {
             }
         }
 
+        $unifiStateResult = runAuxSyncScript('unifi_state.php');
+        if ($unifiStateResult['ok']) {
+            echo "[" . date('Y-m-d H:i:s') . "] unifi_state.php completed\n";
+        } else {
+            echo "[" . date('Y-m-d H:i:s') . "] unifi_state.php failed (exit=" . $unifiStateResult['exit_code'] . ")\n";
+            if ($unifiStateResult['output'] !== '') {
+                echo $unifiStateResult['output'] . "\n";
+            }
+        }
+
+        $unifiVpnStateResult = runAuxSyncScript('unifi_vpn_state.php');
+        if ($unifiVpnStateResult['ok']) {
+            echo "[" . date('Y-m-d H:i:s') . "] unifi_vpn_state.php completed\n";
+        } else {
+            echo "[" . date('Y-m-d H:i:s') . "] unifi_vpn_state.php failed (exit=" . $unifiVpnStateResult['exit_code'] . ")\n";
+            if ($unifiVpnStateResult['output'] !== '') {
+                echo $unifiVpnStateResult['output'] . "\n";
+            }
+        }
+
         $starlinkSyncResult = runAuxSyncScript('sync_starlink.php');
         if ($starlinkSyncResult['ok']) {
             echo "[" . date('Y-m-d H:i:s') . "] sync_starlink.php completed\n";
@@ -102,6 +122,10 @@ while (true) {
             'pihole_skipped' => $piholeResult['skipped'] || $reconcileResult['skipped'],
             'sync_devices_unifi_ok' => $unifiSyncResult['ok'],
             'sync_devices_unifi_exit_code' => $unifiSyncResult['exit_code'],
+            'unifi_state_ok' => $unifiStateResult['ok'],
+            'unifi_state_exit_code' => $unifiStateResult['exit_code'],
+            'unifi_vpn_state_ok' => $unifiVpnStateResult['ok'],
+            'unifi_vpn_state_exit_code' => $unifiVpnStateResult['exit_code'],
             'sync_starlink_ok' => $starlinkSyncResult['ok'],
             'sync_starlink_exit_code' => $starlinkSyncResult['exit_code'],
         ], null);
