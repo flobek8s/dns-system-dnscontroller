@@ -342,7 +342,16 @@ try {
             last_seen_at = VALUES(last_seen_at),
             updated_at = CURRENT_TIMESTAMP';
 
-    $history_sql = 'INSERT INTO unifi_device_history
+    $history_requires_manual_id_stmt = $pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'unifi_device_history' AND COLUMN_NAME = 'id' AND IS_NULLABLE = 'NO' AND COLUMN_DEFAULT IS NULL AND EXTRA NOT LIKE '%auto_increment%'");
+    $history_requires_manual_id = (int) $history_requires_manual_id_stmt->fetchColumn() > 0;
+    $next_history_id = $history_requires_manual_id ? (int) $pdo->query('SELECT COALESCE(MAX(id), 0) + 1 FROM unifi_device_history')->fetchColumn() : null;
+
+    $history_sql = $history_requires_manual_id
+        ? 'INSERT INTO unifi_device_history
+        (id, sync_id, event_type, mac, display_name, hostname, ip, network_name, link_type, status, source, is_vpn, vpn_name, vpn_route_desc, vpn_endpoint_host, vpn_endpoint_port, first_seen_unix, last_seen_unix)
+        VALUES
+        (:id, :sync_id, :event_type, :mac, :display_name, :hostname, :ip, :network_name, :link_type, :status, :source, :is_vpn, :vpn_name, :vpn_route_desc, :vpn_endpoint_host, :vpn_endpoint_port, :first_seen_unix, :last_seen_unix)'
+        : 'INSERT INTO unifi_device_history
         (sync_id, event_type, mac, display_name, hostname, ip, network_name, link_type, status, source, is_vpn, vpn_name, vpn_route_desc, vpn_endpoint_host, vpn_endpoint_port, first_seen_unix, last_seen_unix)
         VALUES
         (:sync_id, :event_type, :mac, :display_name, :hostname, :ip, :network_name, :link_type, :status, :source, :is_vpn, :vpn_name, :vpn_route_desc, :vpn_endpoint_host, :vpn_endpoint_port, :first_seen_unix, :last_seen_unix)';
@@ -378,7 +387,7 @@ try {
             ':last_seen_unix' => $row['last_seen_unix'],
         ]);
 
-        $history_stmt->execute([
+        $history_params = [
             ':sync_id' => $sync_id,
             ':event_type' => 'seen',
             ':mac' => $row['mac'],
@@ -396,7 +405,11 @@ try {
             ':vpn_endpoint_port' => $row['vpn_endpoint_port'],
             ':first_seen_unix' => $row['first_seen_unix'],
             ':last_seen_unix' => $row['last_seen_unix'],
-        ]);
+        ];
+        if ($history_requires_manual_id) {
+            $history_params[':id'] = $next_history_id++;
+        }
+        $history_stmt->execute($history_params);
 
         $history_seen++;
         $processed++;
@@ -415,7 +428,7 @@ try {
                 ':mac' => $old['mac'],
             ]);
 
-            $history_stmt->execute([
+            $missing_history_params = [
                 ':sync_id' => $sync_id,
                 ':event_type' => 'missing',
                 ':mac' => $old['mac'],
@@ -433,7 +446,11 @@ try {
                 ':vpn_endpoint_port' => $old['vpn_endpoint_port'] !== null ? (int) $old['vpn_endpoint_port'] : null,
                 ':first_seen_unix' => $old['first_seen_unix'] !== null ? (int) $old['first_seen_unix'] : null,
                 ':last_seen_unix' => $old['last_seen_unix'] !== null ? (int) $old['last_seen_unix'] : null,
-            ]);
+            ];
+            if ($history_requires_manual_id) {
+                $missing_history_params[':id'] = $next_history_id++;
+            }
+            $history_stmt->execute($missing_history_params);
 
             $history_missing++;
         }
