@@ -205,6 +205,19 @@ function array_get(array $data, string $path, $default = null)
     return $current;
 }
 
+function table_requires_manual_id(PDO $pdo, string $table_name): bool
+{
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = 'id' AND IS_NULLABLE = 'NO' AND COLUMN_DEFAULT IS NULL AND EXTRA NOT LIKE '%auto_increment%'");
+    $stmt->execute([':table_name' => $table_name]);
+
+    return (int) $stmt->fetchColumn() > 0;
+}
+
+function next_table_id(PDO $pdo, string $table_name): int
+{
+    return (int) $pdo->query('SELECT COALESCE(MAX(id), 0) + 1 FROM ' . $table_name)->fetchColumn();
+}
+
 try {
     $errors = [];
 
@@ -388,6 +401,22 @@ try {
         KEY idx_sync_id (sync_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+    $manual_id_tables = [
+        'starlink_state_history',
+        'starlink_boot_count_changes',
+        'starlink_public_ip_changes',
+        'starlink_software_version_changes',
+        'starlink_monthly_data_usage_changes',
+    ];
+    $manual_id_required = [];
+    $next_manual_ids = [];
+    foreach ($manual_id_tables as $table_name) {
+        $manual_id_required[$table_name] = table_requires_manual_id($pdo, $table_name);
+        if ($manual_id_required[$table_name]) {
+            $next_manual_ids[$table_name] = next_table_id($pdo, $table_name);
+        }
+    }
+
     $old = $pdo->query('SELECT * FROM starlink_state WHERE id = 1 LIMIT 1')->fetch();
 
     $stmt_upsert = $pdo->prepare("INSERT INTO starlink_state (
@@ -430,7 +459,18 @@ try {
     }
 
     if (!empty($changed_fields)) {
-        $stmt_hist = $pdo->prepare("INSERT INTO starlink_state_history (
+        $history_requires_manual_id = $manual_id_required['starlink_state_history'] ?? false;
+        $stmt_hist = $pdo->prepare($history_requires_manual_id
+            ? "INSERT INTO starlink_state_history (
+            id, sync_id, isp, city, dish_id, hardware_version, software_version,
+            boot_count, uptime_seconds, pop_ping_latency_ms, obstruction_fraction,
+            obstruction_percent, monthly_data_usage_bytes, public_ip, change_summary
+        ) VALUES (
+            :id, :sync_id, :isp, :city, :dish_id, :hardware_version, :software_version,
+            :boot_count, :uptime_seconds, :pop_ping_latency_ms, :obstruction_fraction,
+            :obstruction_percent, :monthly_data_usage_bytes, :public_ip, :change_summary
+        )"
+            : "INSERT INTO starlink_state_history (
             sync_id, isp, city, dish_id, hardware_version, software_version,
             boot_count, uptime_seconds, pop_ping_latency_ms, obstruction_fraction,
             obstruction_percent, monthly_data_usage_bytes, public_ip, change_summary
@@ -443,42 +483,73 @@ try {
         $hist_data = $row;
         $hist_data['sync_id'] = $sync_id;
         $hist_data['change_summary'] = implode(',', $changed_fields);
+        if ($history_requires_manual_id) {
+            $hist_data['id'] = $next_manual_ids['starlink_state_history']++;
+        }
         $stmt_hist->execute($hist_data);
 
         if ($old !== false && in_array('boot_count', $changed_fields, true)) {
-            $stmt = $pdo->prepare('INSERT INTO starlink_boot_count_changes (sync_id, old_boot_count, new_boot_count) VALUES (:sync_id, :old_boot_count, :new_boot_count)');
-            $stmt->execute([
+            $boot_changes_requires_manual_id = $manual_id_required['starlink_boot_count_changes'] ?? false;
+            $stmt = $pdo->prepare($boot_changes_requires_manual_id
+                ? 'INSERT INTO starlink_boot_count_changes (id, sync_id, old_boot_count, new_boot_count) VALUES (:id, :sync_id, :old_boot_count, :new_boot_count)'
+                : 'INSERT INTO starlink_boot_count_changes (sync_id, old_boot_count, new_boot_count) VALUES (:sync_id, :old_boot_count, :new_boot_count)');
+            $data = [
                 'sync_id' => $sync_id,
                 'old_boot_count' => is_numeric($old['boot_count'] ?? null) ? (int) $old['boot_count'] : null,
                 'new_boot_count' => $row['boot_count'],
-            ]);
+            ];
+            if ($boot_changes_requires_manual_id) {
+                $data['id'] = $next_manual_ids['starlink_boot_count_changes']++;
+            }
+            $stmt->execute($data);
         }
 
         if ($old !== false && in_array('public_ip', $changed_fields, true)) {
-            $stmt = $pdo->prepare('INSERT INTO starlink_public_ip_changes (sync_id, old_public_ip, new_public_ip) VALUES (:sync_id, :old_public_ip, :new_public_ip)');
-            $stmt->execute([
+            $public_ip_changes_requires_manual_id = $manual_id_required['starlink_public_ip_changes'] ?? false;
+            $stmt = $pdo->prepare($public_ip_changes_requires_manual_id
+                ? 'INSERT INTO starlink_public_ip_changes (id, sync_id, old_public_ip, new_public_ip) VALUES (:id, :sync_id, :old_public_ip, :new_public_ip)'
+                : 'INSERT INTO starlink_public_ip_changes (sync_id, old_public_ip, new_public_ip) VALUES (:sync_id, :old_public_ip, :new_public_ip)');
+            $data = [
                 'sync_id' => $sync_id,
                 'old_public_ip' => (string) ($old['public_ip'] ?? ''),
                 'new_public_ip' => (string) $row['public_ip'],
-            ]);
+            ];
+            if ($public_ip_changes_requires_manual_id) {
+                $data['id'] = $next_manual_ids['starlink_public_ip_changes']++;
+            }
+            $stmt->execute($data);
         }
 
         if ($old !== false && in_array('software_version', $changed_fields, true)) {
-            $stmt = $pdo->prepare('INSERT INTO starlink_software_version_changes (sync_id, old_software_version, new_software_version) VALUES (:sync_id, :old_software_version, :new_software_version)');
-            $stmt->execute([
+            $software_changes_requires_manual_id = $manual_id_required['starlink_software_version_changes'] ?? false;
+            $stmt = $pdo->prepare($software_changes_requires_manual_id
+                ? 'INSERT INTO starlink_software_version_changes (id, sync_id, old_software_version, new_software_version) VALUES (:id, :sync_id, :old_software_version, :new_software_version)'
+                : 'INSERT INTO starlink_software_version_changes (sync_id, old_software_version, new_software_version) VALUES (:sync_id, :old_software_version, :new_software_version)');
+            $data = [
                 'sync_id' => $sync_id,
                 'old_software_version' => (string) ($old['software_version'] ?? ''),
                 'new_software_version' => (string) $row['software_version'],
-            ]);
+            ];
+            if ($software_changes_requires_manual_id) {
+                $data['id'] = $next_manual_ids['starlink_software_version_changes']++;
+            }
+            $stmt->execute($data);
         }
 
         if ($old !== false && in_array('monthly_data_usage_bytes', $changed_fields, true)) {
-            $stmt = $pdo->prepare('INSERT INTO starlink_monthly_data_usage_changes (sync_id, old_monthly_data_usage_bytes, new_monthly_data_usage_bytes) VALUES (:sync_id, :old_monthly_data_usage_bytes, :new_monthly_data_usage_bytes)');
-            $stmt->execute([
+            $monthly_usage_changes_requires_manual_id = $manual_id_required['starlink_monthly_data_usage_changes'] ?? false;
+            $stmt = $pdo->prepare($monthly_usage_changes_requires_manual_id
+                ? 'INSERT INTO starlink_monthly_data_usage_changes (id, sync_id, old_monthly_data_usage_bytes, new_monthly_data_usage_bytes) VALUES (:id, :sync_id, :old_monthly_data_usage_bytes, :new_monthly_data_usage_bytes)'
+                : 'INSERT INTO starlink_monthly_data_usage_changes (sync_id, old_monthly_data_usage_bytes, new_monthly_data_usage_bytes) VALUES (:sync_id, :old_monthly_data_usage_bytes, :new_monthly_data_usage_bytes)');
+            $data = [
                 'sync_id' => $sync_id,
                 'old_monthly_data_usage_bytes' => is_numeric($old['monthly_data_usage_bytes'] ?? null) ? (float) $old['monthly_data_usage_bytes'] : null,
                 'new_monthly_data_usage_bytes' => is_numeric($row['monthly_data_usage_bytes'] ?? null) ? (float) $row['monthly_data_usage_bytes'] : null,
-            ]);
+            ];
+            if ($monthly_usage_changes_requires_manual_id) {
+                $data['id'] = $next_manual_ids['starlink_monthly_data_usage_changes']++;
+            }
+            $stmt->execute($data);
         }
     }
 
