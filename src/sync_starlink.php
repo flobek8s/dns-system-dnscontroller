@@ -300,7 +300,7 @@ try {
         'public_ip' => $public_ip,
     ];
 
-    $dsn = 'mysql:host=' . $db_host . ';port=' . $db_port . ';dbname=' . $db_name . ';charset=utf8mb4';
+    $dsn = 'mysql:host=' . $db_host . ';dbname=' . $db_name . ';charset=utf8mb4';
     $pdo = new PDO($dsn, $db_user, $db_pass, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -319,8 +319,8 @@ try {
         obstruction_fraction DECIMAL(10,6) DEFAULT NULL,
         obstruction_percent DECIMAL(10,3) DEFAULT NULL,
         monthly_data_usage_bytes DECIMAL(20,3) DEFAULT NULL,
-        monthly_data_usage_mb DECIMAL(20,3) GENERATED ALWAYS AS (monthly_data_usage_bytes / 1048576) STORED,
-        monthly_data_usage_tb DECIMAL(20,6) GENERATED ALWAYS AS (monthly_data_usage_bytes / 1099511627776) STORED,
+        monthly_data_usage_mb DECIMAL(20,3) GENERATED ALWAYS AS (monthly_data_usage_bytes / 1000000) STORED,
+        monthly_data_usage_tb DECIMAL(20,6) GENERATED ALWAYS AS (monthly_data_usage_bytes / 1000000000000) STORED,
         public_ip VARCHAR(45) NOT NULL DEFAULT '',
         observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -328,6 +328,14 @@ try {
         PRIMARY KEY (id),
         KEY idx_observed_at (observed_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Keep existing installations aligned with decimal MB/TB expressions.
+    try {
+        $pdo->exec("ALTER TABLE starlink_state
+            MODIFY COLUMN monthly_data_usage_mb DECIMAL(20,3) GENERATED ALWAYS AS (monthly_data_usage_bytes / 1000000) STORED,
+            MODIFY COLUMN monthly_data_usage_tb DECIMAL(20,6) GENERATED ALWAYS AS (monthly_data_usage_bytes / 1000000000000) STORED");
+    } catch (Throwable $e) {
+    }
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS starlink_state_history (
         id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -553,7 +561,9 @@ try {
         }
     }
 
-    header('Content-Type: application/json');
+    if (!headers_sent()) {
+        header('Content-Type: application/json');
+    }
     echo json_encode([
         'sync_id' => $sync_id,
         'state_upserted' => true,
@@ -564,7 +574,9 @@ try {
     ], JSON_PRETTY_PRINT) . PHP_EOL;
 } catch (Exception $e) {
     http_response_code(500);
-    header('Content-Type: application/json');
+    if (!headers_sent()) {
+        header('Content-Type: application/json');
+    }
     echo json_encode([
         'error' => $e->getMessage(),
     ], JSON_PRETTY_PRINT) . PHP_EOL;
