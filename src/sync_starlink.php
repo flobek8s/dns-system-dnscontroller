@@ -398,16 +398,26 @@ try {
         id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
         sync_id VARCHAR(40) NOT NULL,
         old_monthly_data_usage_bytes DECIMAL(20,3) DEFAULT NULL,
-        old_monthly_data_usage_mb DECIMAL(20,3) GENERATED ALWAYS AS (old_monthly_data_usage_bytes / 1048576) STORED,
-        old_monthly_data_usage_tb DECIMAL(20,6) GENERATED ALWAYS AS (old_monthly_data_usage_bytes / 1099511627776) STORED,
+        old_monthly_data_usage_mb DECIMAL(20,3) GENERATED ALWAYS AS (old_monthly_data_usage_bytes / 1000000) STORED,
+        old_monthly_data_usage_tb DECIMAL(20,6) GENERATED ALWAYS AS (old_monthly_data_usage_bytes / 1000000000000) STORED,
         new_monthly_data_usage_bytes DECIMAL(20,3) DEFAULT NULL,
-        new_monthly_data_usage_mb DECIMAL(20,3) GENERATED ALWAYS AS (new_monthly_data_usage_bytes / 1048576) STORED,
-        new_monthly_data_usage_tb DECIMAL(20,6) GENERATED ALWAYS AS (new_monthly_data_usage_bytes / 1099511627776) STORED,
+        new_monthly_data_usage_mb DECIMAL(20,3) GENERATED ALWAYS AS (new_monthly_data_usage_bytes / 1000000) STORED,
+        new_monthly_data_usage_tb DECIMAL(20,6) GENERATED ALWAYS AS (new_monthly_data_usage_bytes / 1000000000000) STORED,
         observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
         KEY idx_observed_at (observed_at),
         KEY idx_sync_id (sync_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Keep existing installations aligned with decimal MB/TB expressions.
+    try {
+        $pdo->exec("ALTER TABLE starlink_monthly_data_usage_changes
+            MODIFY COLUMN old_monthly_data_usage_mb DECIMAL(20,3) GENERATED ALWAYS AS (old_monthly_data_usage_bytes / 1000000) STORED,
+            MODIFY COLUMN old_monthly_data_usage_tb DECIMAL(20,6) GENERATED ALWAYS AS (old_monthly_data_usage_bytes / 1000000000000) STORED,
+            MODIFY COLUMN new_monthly_data_usage_mb DECIMAL(20,3) GENERATED ALWAYS AS (new_monthly_data_usage_bytes / 1000000) STORED,
+            MODIFY COLUMN new_monthly_data_usage_tb DECIMAL(20,6) GENERATED ALWAYS AS (new_monthly_data_usage_bytes / 1000000000000) STORED");
+    } catch (Throwable $e) {
+    }
 
     $manual_id_tables = [
         'starlink_state_history',
