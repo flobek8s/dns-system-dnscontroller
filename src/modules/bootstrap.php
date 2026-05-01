@@ -7,7 +7,7 @@ function loadConfig()
         'db_user' => $_ENV['mysql_user'],
         'db_pass' => $_ENV['mysql_pass'],
         'db_name' => $_ENV['mysql_db'],
-        'interval_seconds' => 300,
+        'interval_seconds' => intval($_ENV['poll_interval'] ?? '300'),
         'token_file' => '/var/run/secrets/kubernetes.io/serviceaccount/token',
         'ca_file' => '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt',
         'kube_api' => 'https://kubernetes.default.svc',

@@ -14,6 +14,29 @@ $token = getKubernetesToken($config['token_file']);
 
 ensureSyncAuditTables($pdo);
 
+function runAuxSyncScript(string $scriptName): array
+{
+    $scriptPath = __DIR__ . '/' . $scriptName;
+    if (!is_file($scriptPath)) {
+        return [
+            'ok' => false,
+            'exit_code' => 1,
+            'output' => 'Script not found: ' . $scriptPath,
+        ];
+    }
+
+    $command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($scriptPath) . ' 2>&1';
+    $lines = [];
+    $exitCode = 0;
+    exec($command, $lines, $exitCode);
+
+    return [
+        'ok' => $exitCode === 0,
+        'exit_code' => $exitCode,
+        'output' => trim(implode("\n", $lines)),
+    ];
+}
+
 while (true) {
     $runId = null;
     try {
@@ -30,6 +53,26 @@ while (true) {
         logSyncEvents($pdo, $runId, 'pihole_inventory', $piholeResult['events']);
         $reconcileResult = reconcileManagedDomainsInPihole($pdo, $config);
         logSyncEvents($pdo, $runId, 'pihole_reconcile', $reconcileResult['events']);
+
+        $unifiSyncResult = runAuxSyncScript('sync_devices_unifi.php');
+        if ($unifiSyncResult['ok']) {
+            echo "[" . date('Y-m-d H:i:s') . "] sync_devices_unifi.php completed\n";
+        } else {
+            echo "[" . date('Y-m-d H:i:s') . "] sync_devices_unifi.php failed (exit=" . $unifiSyncResult['exit_code'] . ")\n";
+            if ($unifiSyncResult['output'] !== '') {
+                echo $unifiSyncResult['output'] . "\n";
+            }
+        }
+
+        $starlinkSyncResult = runAuxSyncScript('sync_starlink.php');
+        if ($starlinkSyncResult['ok']) {
+            echo "[" . date('Y-m-d H:i:s') . "] sync_starlink.php completed\n";
+        } else {
+            echo "[" . date('Y-m-d H:i:s') . "] sync_starlink.php failed (exit=" . $starlinkSyncResult['exit_code'] . ")\n";
+            if ($starlinkSyncResult['output'] !== '') {
+                echo $starlinkSyncResult['output'] . "\n";
+            }
+        }
 
         echo "[" . date('Y-m-d H:i:s') . "] Ingress processed=" . $ingressResult['processed'] . ", inserted=" . $ingressResult['inserted'] . ", updated=" . $ingressResult['updated'] . ", unchanged=" . $ingressResult['unchanged'] . ", removed=" . $ingressResult['removed'] . "\n";
         if (!empty($ingressResult['stale_candidates'])) {
@@ -57,6 +100,10 @@ while (true) {
             'pihole_updated' => $reconcileResult['updated'],
             'pihole_removed' => $reconcileResult['removed'],
             'pihole_skipped' => $piholeResult['skipped'] || $reconcileResult['skipped'],
+            'sync_devices_unifi_ok' => $unifiSyncResult['ok'],
+            'sync_devices_unifi_exit_code' => $unifiSyncResult['exit_code'],
+            'sync_starlink_ok' => $starlinkSyncResult['ok'],
+            'sync_starlink_exit_code' => $starlinkSyncResult['exit_code'],
         ], null);
     } catch (Exception $e) {
         echo "[" . date('Y-m-d H:i:s') . "] ERROR: " . $e->getMessage() . "\n";
